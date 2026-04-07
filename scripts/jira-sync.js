@@ -103,23 +103,26 @@ async function main() {
 
   const tasksSnap = await db.collection('tasks').get();
 
-  // 이슈키 → 해당 키를 참조하는 syncspace 태스크 목록
-  const keyToTasks = new Map();
+  // task 단위로 연관 Jira 이슈 키 수집 (한 task의 여러 링크는 한 묶음으로)
+  const taskInfo = new Map(); // taskId → { task, keys[] }
   for (const doc of tasksSnap.docs) {
     const t = doc.data();
     const urls = (t.jiraUrls && t.jiraUrls.length > 0)
       ? t.jiraUrls
       : (t.jiraUrl ? [t.jiraUrl] : []);
-    for (const url of urls) {
-      const key = issueKeyFromUrl(url);
-      if (!key) continue;
-      if (!keyToTasks.has(key)) keyToTasks.set(key, []);
-      keyToTasks.get(key).push({ id: doc.id, task: t });
+    const keys = [...new Set(
+      urls.map(u => issueKeyFromUrl(u)).filter(Boolean)
+    )]; // 같은 task 내 중복 링크 제거
+    if (keys.length > 0) {
+      taskInfo.set(doc.id, { task: t, keys });
     }
   }
 
-  const allKeys = [...keyToTasks.keys()];
-  console.log(`전체 task ${tasksSnap.size}건, Jira 이슈 ${allKeys.length}건 조회 대상`);
+  // 전체에서 유니크한 Jira 키만 한 번에 조회
+  const allKeys = [...new Set(
+    [...taskInfo.values()].flatMap(v => v.keys)
+  )];
+  console.log(`전체 task ${tasksSnap.size}건, Jira 링크가 있는 task ${taskInfo.size}건, 유니크 이슈 ${allKeys.length}건 조회`);
 
   if (allKeys.length === 0) {
     console.log('동기화할 항목 없음. 종료.');
@@ -131,63 +134,78 @@ async function main() {
 
   let updated = 0;
   let alreadyInSync = 0;
-  let unmappedSkipped = 0;
-  let notFoundOrNoPermission = 0;
+  let skippedNoUsable = 0;
   const unknownStatuses = new Set();
 
-  for (const [key, taskRefs] of keyToTasks) {
-    const jiraStatus = statuses[key];
-    if (!jiraStatus) {
-      notFoundOrNoPermission++;
-      console.log(`  [skip] ${key}: Jira에서 조회 불가 (삭제됐거나 권한 없음)`);
-      continue;
-    }
+  // task 단위 처리: 한 task의 여러 링크 status를 종합해서 한 번만 update
+  for (const [taskId, { task, keys }] of taskInfo) {
+    const mappedStatuses = []; // 매핑 성공한 syncspace status들
+    const linkSummary = [];    // 로그용
 
-    const targetStatus = JIRA_TO_SYNCSPACE[jiraStatus];
-    if (!targetStatus) {
-      unknownStatuses.add(jiraStatus);
-      unmappedSkipped++;
-      continue;
-    }
-
-    for (const { id, task } of taskRefs) {
-      if (task.status === targetStatus) {
-        alreadyInSync++;
+    for (const key of keys) {
+      const jiraStatus = statuses[key];
+      if (!jiraStatus) {
+        linkSummary.push(`${key}=조회불가`);
         continue;
       }
-
-      const before = task.status || '';
-      console.log(`  [update] ${id} "${task.title}": ${before} → ${targetStatus} (Jira ${key}: ${jiraStatus})`);
-
-      try {
-        await db.collection('tasks').doc(id).update({ status: targetStatus });
-        await db.collection('activity_log').add({
-          when: admin.firestore.FieldValue.serverTimestamp(),
-          who_id: 'jira-sync',
-          who_name: 'Jira 동기화',
-          taskId: id,
-          taskTitle: task.title || '',
-          taskType: task.type || 'feature',
-          action: 'status_changed',
-          before,
-          after: targetStatus,
-          source: 'jira',
-          jira_key: key,
-          jira_status: jiraStatus,
-        });
-        updated++;
-      } catch (e) {
-        console.error(`  [error] ${id} 업데이트 실패:`, e.message);
+      const mapped = JIRA_TO_SYNCSPACE[jiraStatus];
+      if (!mapped) {
+        linkSummary.push(`${key}=${jiraStatus}(매핑X)`);
+        unknownStatuses.add(jiraStatus);
+        continue;
       }
+      mappedStatuses.push(mapped);
+      linkSummary.push(`${key}=${jiraStatus}→${mapped}`);
+    }
+
+    // 매핑된 status가 하나도 없으면 스킵 (안 건드림)
+    if (mappedStatuses.length === 0) {
+      skippedNoUsable++;
+      continue;
+    }
+
+    // 정책:
+    //   - 매핑된 status가 모두 '완료' → 최종 '완료'
+    //   - 하나라도 '진행중'이면 (나머지가 완료든 매핑X든) → '진행중'
+    const allDone = mappedStatuses.every(s => s === '완료');
+    const targetStatus = allDone ? '완료' : '진행중';
+
+    if (task.status === targetStatus) {
+      alreadyInSync++;
+      continue;
+    }
+
+    const before = task.status || '';
+    const summaryStr = linkSummary.join(', ');
+    console.log(`  [update] ${taskId} "${task.title}": ${before} → ${targetStatus} [${summaryStr}]`);
+
+    try {
+      await db.collection('tasks').doc(taskId).update({ status: targetStatus });
+      await db.collection('activity_log').add({
+        when: admin.firestore.FieldValue.serverTimestamp(),
+        who_id: 'jira-sync',
+        who_name: 'Jira 동기화',
+        taskId,
+        taskTitle: task.title || '',
+        taskType: task.type || 'feature',
+        action: 'status_changed',
+        before,
+        after: targetStatus,
+        source: 'jira',
+        jira_keys: keys,
+        jira_link_summary: summaryStr,
+      });
+      updated++;
+    } catch (e) {
+      console.error(`  [error] ${taskId} 업데이트 실패:`, e.message);
     }
   }
 
   console.log('');
   console.log('=== 결과 요약 ===');
-  console.log(`업데이트:       ${updated}건`);
-  console.log(`이미 동기화됨:  ${alreadyInSync}건`);
-  console.log(`매핑 없는 status: ${unmappedSkipped}건`);
-  console.log(`Jira 미발견:    ${notFoundOrNoPermission}건`);
+  console.log(`업데이트:           ${updated}건`);
+  console.log(`이미 동기화됨:      ${alreadyInSync}건`);
+  console.log(`판정 불가 (스킵):   ${skippedNoUsable}건  (매핑 가능한 link가 하나도 없음)`);
   if (unknownStatuses.size > 0) {
     console.log('');
     console.log(`매핑되지 않은 Jira status (필요 시 scripts/jira-sync.js의 JIRA_TO_SYNCSPACE에 추가):`);
