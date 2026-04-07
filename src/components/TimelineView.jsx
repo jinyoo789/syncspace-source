@@ -136,7 +136,7 @@ export default function TimelineView({ tasks, projects = [], onOpenModal }) {
       <div className="mb-4 md:mb-6 shrink-0 flex justify-between items-center flex-wrap gap-3 ml-10 md:ml-0">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-gray-900">타임라인</h1>
-          <p className="text-gray-500 text-xs md:text-sm mt-1 md:mt-1.5 font-medium">업무의 흐름과 겹치는 일정을 간트차���로 확인하세요.</p>
+          <p className="text-gray-500 text-xs md:text-sm mt-1 md:mt-1.5 font-medium">업무의 흐름과 겹치는 일정을 간트차트로 확인하세요.</p>
         </div>
         <div className="flex items-center gap-2 md:gap-3">
           <button
