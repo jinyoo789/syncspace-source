@@ -51,22 +51,49 @@ const authHeader = 'Basic ' + Buffer.from(`${EMAIL}:${TOKEN}`).toString('base64'
 async function fetchJiraStatuses(keys) {
   const result = {};
   const CHUNK = 50;
+  const url = `${JIRA_BASE}/rest/api/3/search/jql`;
+
   for (let i = 0; i < keys.length; i += CHUNK) {
     const chunk = keys.slice(i, i + CHUNK);
     const jql = `key in (${chunk.join(',')})`;
-    const url = `${JIRA_BASE}/rest/api/3/search?jql=${encodeURIComponent(jql)}&fields=status&maxResults=${CHUNK}`;
-    const res = await fetch(url, {
-      headers: { Authorization: authHeader, Accept: 'application/json' },
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      console.error(`Jira API error ${res.status}: ${body.slice(0, 300)}`);
-      continue;
-    }
-    const data = await res.json();
-    for (const issue of data.issues || []) {
-      result[issue.key] = issue.fields?.status?.name || null;
-    }
+
+    // 새 엔드포인트는 POST + JSON body, 페이지네이션은 nextPageToken 기반.
+    // 청크 크기(50)와 maxResults가 같으므로 보통 한 페이지로 끝나지만,
+    // 안전하게 nextPageToken이 오면 한 번 더 받아옴.
+    let nextPageToken = undefined;
+    let safetyCounter = 0;
+    do {
+      const body = {
+        jql,
+        fields: ['status'],
+        maxResults: CHUNK,
+      };
+      if (nextPageToken) body.nextPageToken = nextPageToken;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.text();
+        console.error(`Jira API error ${res.status}: ${errBody.slice(0, 300)}`);
+        break;
+      }
+
+      const data = await res.json();
+      for (const issue of data.issues || []) {
+        result[issue.key] = issue.fields?.status?.name || null;
+      }
+
+      nextPageToken = data.nextPageToken;
+      safetyCounter++;
+    } while (nextPageToken && safetyCounter < 10);
   }
   return result;
 }
