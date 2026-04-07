@@ -17,6 +17,15 @@ const PlusIcon = p => <I {...p} d={<><line x1="12" y1="5" x2="12" y2="19" /><lin
 
 const uid = () => Math.random().toString(36).substr(2, 9);
 
+// 레거시 호환: 과거에는 dev_id/qa_dev_id 자리에 이름이 저장돼 있던 경우가 있음.
+// team 목록에서 id 매칭 → 실패하면 name 매칭 → 매칭된 멤버의 id를 반환.
+// 둘 다 실패하면 빈 문자열(= 미배정)로 떨어뜨려 UI가 깨지지 않게 함.
+const memberIdFromLegacy = (idOrName, team) => {
+  if (!idOrName) return '';
+  const found = (team || []).find(m => m.id === idOrName || m.name === idOrName);
+  return found ? found.id : '';
+};
+
 const TODAY = (() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -82,17 +91,30 @@ export default function TaskModal({
       setCrmBulkMode(false);
       setCrmBulkEnd(TODAY);
       if (initialTask) {
+        // 레거시 정규화: dev_id / qa_dev_id 자리에 이름이 저장된 경우 id로 변환해서 로드.
+        // 이렇게 해두면 이후 저장 시 올바른 id로 Firestore에 반영되어 자연스럽게 마이그레이션됨.
+        const normalizedSubtasks = (initialTask.subtasks?.length
+          ? initialTask.subtasks
+          : [{ id: uid(), role: 'BE', dev_id: '', start: TODAY, end: TODAY, done: false }]
+        ).map(s => ({
+          ...s,
+          dev_id: s.dev_id ? memberIdFromLegacy(s.dev_id, team) || s.dev_id : '',
+        }));
+        const normalizedQaDevId = initialTask.qa_dev_id
+          ? (memberIdFromLegacy(initialTask.qa_dev_id, team) || initialTask.qa_dev_id)
+          : '';
         setFormData({
           ...getDefaultForm(initialTask.type),
           ...initialTask,
-          subtasks: initialTask.subtasks?.length ? initialTask.subtasks : [{ id: uid(), role: 'BE', dev_id: '', start: TODAY, end: TODAY, done: false }],
+          subtasks: normalizedSubtasks,
+          qa_dev_id: normalizedQaDevId,
           deploys: initialTask.deploys || [],
         });
       } else {
         setFormData(getDefaultForm(createType));
       }
     }
-  }, [isOpen, initialTask, createType]);
+  }, [isOpen, initialTask, createType, team]);
 
   const isEditing = mode === 'edit' || mode === 'create';
   const safeClose = () => {
@@ -386,11 +408,11 @@ export default function TaskModal({
             )}
 
             {/* Jira 링크 */}
-            {(formData.jiraUrls?.length > 0 || formData.jiraUrl) && (
+            {formData.jiraUrls?.length > 0 && (
               <div>
                 <h4 className="text-[11px] font-bold text-gray-400 uppercase mb-2">Jira</h4>
                 <div className="space-y-1.5">
-                  {(formData.jiraUrls?.length > 0 ? formData.jiraUrls : [formData.jiraUrl]).filter(Boolean).map((url, i) => (
+                  {formData.jiraUrls.filter(Boolean).map((url, i) => (
                     <a key={i} href={url} target="_blank" rel="noopener noreferrer"
                       className="flex items-center gap-2 text-sm font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-xl border border-blue-200 hover:bg-blue-100 transition-colors truncate">
                       <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -402,11 +424,11 @@ export default function TaskModal({
             )}
 
             {/* Slack 링크 */}
-            {(formData.slackUrls?.length > 0 || formData.slackUrl) && (
+            {formData.slackUrls?.length > 0 && (
               <div>
                 <h4 className="text-[11px] font-bold text-gray-400 uppercase mb-2">Slack</h4>
                 <div className="space-y-1.5">
-                  {(formData.slackUrls?.length > 0 ? formData.slackUrls : [formData.slackUrl]).filter(Boolean).map((url, i) => (
+                  {formData.slackUrls.filter(Boolean).map((url, i) => (
                     <div key={i} className="flex items-center gap-2 flex-wrap">
                       <a href={url.replace(/^https:\/\//, 'slack://')} rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-100 transition-colors">앱</a>
@@ -586,10 +608,10 @@ export default function TaskModal({
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-gray-500 mb-1">담당자</label>
-                    <select value={getMemberName(s.dev_id)} onChange={e => setSub(i, 'dev_id', e.target.value)}
+                    <select value={memberIdFromLegacy(s.dev_id, team)} onChange={e => setSub(i, 'dev_id', e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-bold outline-none">
                       <option value="">미배정</option>
-                      {team.filter(t => t.role !== 'PM').map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                      {team.filter(t => t.role !== 'PM').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                   </div>
                 </div>
@@ -632,10 +654,10 @@ export default function TaskModal({
                 </div>
                 <div className="mb-3">
                   <label className="block text-xs font-bold text-emerald-600 mb-1">QA 담당</label>
-                  <select value={getMemberName(formData.qa_dev_id)} onChange={e => set('qa_dev_id', e.target.value)}
+                  <select value={memberIdFromLegacy(formData.qa_dev_id, team)} onChange={e => set('qa_dev_id', e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-sm font-bold outline-none">
                     <option value="">미배정</option>
-                    {team.filter(t => t.role === 'QA').map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                    {team.filter(t => t.role === 'QA').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -869,12 +891,12 @@ export default function TaskModal({
                 <button type="button" onClick={() => set('jiraUrls', [...(formData.jiraUrls || []), ''])}
                   className="text-[10px] font-bold text-blue-600 hover:text-blue-800">+ 추가</button>
               </div>
-              {(formData.jiraUrls?.length > 0 ? formData.jiraUrls : [formData.jiraUrl || '']).map((url, i) => (
+              {(formData.jiraUrls?.length > 0 ? formData.jiraUrls : ['']).map((url, i) => (
                 <div key={i} className="flex gap-2 mb-2">
                   <input type="url" value={url} onChange={e => {
-                    const urls = [...(formData.jiraUrls?.length > 0 ? formData.jiraUrls : [formData.jiraUrl || ''])];
+                    const urls = [...(formData.jiraUrls?.length > 0 ? formData.jiraUrls : [''])];
                     urls[i] = e.target.value;
-                    set('jiraUrls', urls); set('jiraUrl', '');
+                    set('jiraUrls', urls);
                   }}
                     placeholder="https://yourteam.atlassian.net/browse/PROJ-123"
                     className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -893,12 +915,12 @@ export default function TaskModal({
                 <button type="button" onClick={() => set('slackUrls', [...(formData.slackUrls || []), ''])}
                   className="text-[10px] font-bold text-purple-600 hover:text-purple-800">+ 추가</button>
               </div>
-              {(formData.slackUrls?.length > 0 ? formData.slackUrls : [formData.slackUrl || '']).map((url, i) => (
+              {(formData.slackUrls?.length > 0 ? formData.slackUrls : ['']).map((url, i) => (
                 <div key={i} className="flex gap-2 mb-2">
                   <input type="url" value={url} onChange={e => {
-                    const urls = [...(formData.slackUrls?.length > 0 ? formData.slackUrls : [formData.slackUrl || ''])];
+                    const urls = [...(formData.slackUrls?.length > 0 ? formData.slackUrls : [''])];
                     urls[i] = e.target.value;
-                    set('slackUrls', urls); set('slackUrl', '');
+                    set('slackUrls', urls);
                   }}
                     placeholder="https://yourteam.slack.com/archives/C.../p..."
                     className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none" />

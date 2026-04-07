@@ -43,7 +43,20 @@ export default function App() {
     if (!firebaseUser) return; // 로그인 전엔 Firestore 구독 안 함
 
     const unsubTasks = onSnapshot(collection(db, 'tasks'), (snapshot) => {
-      const dbTasks = snapshot.docs.map(doc => ({ ...doc.data() }));
+      // 레거시 정규화: 옛 데이터의 jiraUrl / slackUrl(단일 string)를 jiraUrls / slackUrls(배열)로 변환.
+      // downstream 컴포넌트는 오직 배열 필드만 신경쓰면 됨. 실제 Firestore는 다음 저장 시 자연스럽게 정리됨.
+      const dbTasks = snapshot.docs.map(doc => {
+        const data = { ...doc.data() };
+        if (!Array.isArray(data.jiraUrls) || data.jiraUrls.length === 0) {
+          data.jiraUrls = data.jiraUrl ? [data.jiraUrl] : [];
+        }
+        if (!Array.isArray(data.slackUrls) || data.slackUrls.length === 0) {
+          data.slackUrls = data.slackUrl ? [data.slackUrl] : [];
+        }
+        delete data.jiraUrl;
+        delete data.slackUrl;
+        return data;
+      });
       setTasks(dbTasks);
       setIsLoading(false);
     });
@@ -163,6 +176,11 @@ export default function App() {
       await setDoc(doc(db, 'tasks', savedTask.id), savedTask);
 
       const baseLog = {
+        entityType: 'task',
+        entityId: savedTask.id,
+        entityName: savedTask.title,
+        entityMeta: { type: savedTask.type || 'feature' },
+        // 레거시 호환용 필드(구 ActivityLogView가 읽을 수 있도록 유지)
         taskId: savedTask.id,
         taskTitle: savedTask.title,
         taskType: savedTask.type || 'feature',
@@ -213,6 +231,10 @@ export default function App() {
       const updated = { ...task, status: newStatus };
       await setDoc(doc(db, 'tasks', task.id), updated);
       logActivity({
+        entityType: 'task',
+        entityId: task.id,
+        entityName: task.title || '',
+        entityMeta: { type: task.type || 'feature' },
         taskId: task.id,
         taskTitle: task.title || '',
         taskType: task.type || 'feature',
@@ -233,6 +255,10 @@ export default function App() {
         await deleteDoc(doc(db, 'tasks', taskId));
         if (oldTask) {
           logActivity({
+            entityType: 'task',
+            entityId: taskId,
+            entityName: oldTask.title || '',
+            entityMeta: { type: oldTask.type || 'feature' },
             taskId,
             taskTitle: oldTask.title || '',
             taskType: oldTask.type || 'feature',
@@ -258,6 +284,53 @@ export default function App() {
         );
       }
       await setDoc(doc(db, 'projects', savedProj.id), savedProj);
+
+      // 활동 로그 — 기존 프로젝트와 변경된 필드만 기록
+      const baseLog = {
+        entityType: 'project',
+        entityId: savedProj.id,
+        entityName: savedProj.name,
+      };
+
+      // oldProj는 selectedProjectModal 스냅샷 — 생성 시엔 없거나 name이 비어있음
+      const existingProj = projects.find(p => p.id === savedProj.id);
+      if (!existingProj) {
+        logActivity({ ...baseLog, action: 'created' });
+      } else {
+        if (existingProj.name !== savedProj.name) {
+          logActivity({
+            ...baseLog,
+            action: 'name_changed',
+            before: existingProj.name || '',
+            after: savedProj.name || '',
+          });
+        }
+        if ((existingProj.status || '') !== (savedProj.status || '')) {
+          logActivity({
+            ...baseLog,
+            action: 'status_changed',
+            before: existingProj.status || '',
+            after: savedProj.status || '',
+          });
+        }
+        if ((existingProj.pm || '') !== (savedProj.pm || '')) {
+          logActivity({
+            ...baseLog,
+            action: 'pm_changed',
+            before: existingProj.pm || '없음',
+            after: savedProj.pm || '없음',
+          });
+        }
+        if ((existingProj.priority || '') !== (savedProj.priority || '')) {
+          logActivity({
+            ...baseLog,
+            action: 'priority_changed',
+            before: existingProj.priority || '',
+            after: savedProj.priority || '',
+          });
+        }
+      }
+
       closeProjectModal();
     } catch (error) {
       console.error("Error saving project:", error);
@@ -268,7 +341,16 @@ export default function App() {
   const handleDeleteProject = async (projId) => {
     if (window.confirm("정말 이 프로젝트를 삭제하시겠습니까? 연관된 태스크들은 그대로 남습니다.")) {
       try {
+        const oldProj = projects.find(p => p.id === projId);
         await deleteDoc(doc(db, 'projects', projId));
+        if (oldProj) {
+          logActivity({
+            entityType: 'project',
+            entityId: projId,
+            entityName: oldProj.name || '',
+            action: 'deleted',
+          });
+        }
         closeProjectModal();
       } catch (error) {
         console.error("Error deleting project:", error);
@@ -281,7 +363,44 @@ export default function App() {
 
   const handleSaveMember = async (member) => {
     try {
+      const existingMember = team.find(m => m.id === member.id);
       await setDoc(doc(db, 'team', member.id), member);
+
+      const baseLog = {
+        entityType: 'member',
+        entityId: member.id,
+        entityName: member.name || '',
+        entityMeta: { role: member.role || '' },
+      };
+
+      if (!existingMember) {
+        logActivity({ ...baseLog, action: 'created' });
+      } else {
+        if ((existingMember.name || '') !== (member.name || '')) {
+          logActivity({
+            ...baseLog,
+            action: 'name_changed',
+            before: existingMember.name || '',
+            after: member.name || '',
+          });
+        }
+        if ((existingMember.email || '') !== (member.email || '')) {
+          logActivity({
+            ...baseLog,
+            action: 'email_changed',
+            before: existingMember.email || '없음',
+            after: member.email || '없음',
+          });
+        }
+        if ((existingMember.role || '') !== (member.role || '')) {
+          logActivity({
+            ...baseLog,
+            action: 'role_changed',
+            before: existingMember.role || '',
+            after: member.role || '',
+          });
+        }
+      }
     } catch (error) {
       console.error("Error saving member:", error);
       alert("저장 중 오류가 발생했습니다.");
@@ -290,7 +409,17 @@ export default function App() {
 
   const handleDeleteMember = async (memberId) => {
     try {
+      const oldMember = team.find(m => m.id === memberId);
       await deleteDoc(doc(db, 'team', memberId));
+      if (oldMember) {
+        logActivity({
+          entityType: 'member',
+          entityId: memberId,
+          entityName: oldMember.name || '',
+          entityMeta: { role: oldMember.role || '' },
+          action: 'deleted',
+        });
+      }
     } catch (error) {
       console.error("Error deleting member:", error);
       alert("삭제 중 오류가 발생했습니다.");
@@ -356,7 +485,7 @@ export default function App() {
           <TimelineView tasks={tasks} projects={projects} onOpenModal={openModal} />
         )}
         {currentView === 'activity' && (
-          <ActivityLogView logs={activityLogs} tasks={tasks} onOpenModal={openModal} />
+          <ActivityLogView logs={activityLogs} tasks={tasks} projects={projects} onOpenModal={openModal} />
         )}
         {currentView === 'settings' && (
           <SettingsView team={team} onSaveMember={handleSaveMember} onDeleteMember={handleDeleteMember} />

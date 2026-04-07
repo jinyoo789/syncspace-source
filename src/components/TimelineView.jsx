@@ -44,7 +44,7 @@ export default function TimelineView({ tasks, projects = [], onOpenModal }) {
       const bRange = getTaskDateRange(b);
       return (aRange.start || '').localeCompare(bRange.start || '');
     });
-  }, [tasks, hideCompleted, showTodo]);
+  }, [tasks, hideCompleted, showTodo, pmProjectNames, projPriorityMap]);
 
   // 프로젝트 그룹 계산 (rowSpan용)
   const projectGroups = useMemo(() => {
