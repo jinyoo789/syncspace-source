@@ -458,7 +458,7 @@ export default function App() {
 
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         {currentView === 'today' && (
-          <TodayView tasks={tasks} projects={projects} loggedInUser={loggedInUser} onOpenModal={openModal} />
+          <TodayView tasks={tasks} projects={projects} loggedInUser={loggedInUser} onOpenModal={openModal} setCurrentView={setCurrentView} />
         )}
         {currentView === 'general' && (
           <GeneralTaskView tasks={tasks} onOpenModal={openModal} CATEGORIES={CATEGORIES} />

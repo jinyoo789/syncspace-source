@@ -17,10 +17,19 @@ const ShieldIcon = p => <I {...p} d={<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6
 const CodeIcon = p => <I {...p} d={<><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></>} />;
 const CheckIcon = p => <I {...p} d={<><polyline points="20 6 9 17 4 12" /></>} />;
 
-export default function TodayView({ tasks = [], projects = [], loggedInUser, onOpenModal }) {
+export default function TodayView({ tasks = [], projects = [], loggedInUser, onOpenModal, setCurrentView }) {
   const today = todayISO();
   const NOW = new Date();
   const days = ['일', '월', '화', '수', '목', '금', '토'];
+
+  // 재배정 필요: 내가 PM인 프로젝트에서 반려된 task들
+  // project.pm 필드에는 팀원 이름이 저장되므로 loggedInUser.name과 비교
+  const myProjectNames = projects
+    .filter(p => p.pm && loggedInUser?.name && p.pm === loggedInUser.name)
+    .map(p => p.name);
+  const rejectedForMe = tasks.filter(t =>
+    t.status === '반려' && myProjectNames.includes(t.project)
+  );
 
   // 1. PRD 배포 (프로젝트 deploys + 태스크 deploys)
   const todayPRD = [];
@@ -128,9 +137,37 @@ export default function TodayView({ tasks = [], projects = [], loggedInUser, onO
             {NOW.getFullYear()}년 {NOW.getMonth() + 1}월 {NOW.getDate()}일 ({days[NOW.getDay()]}요일)
           </p>
           <h1 className="text-xl md:text-3xl font-black mb-1 md:mb-2 leading-tight">오늘의 주요 서비스 하이라이트</h1>
-          <p className="text-slate-200 font-medium text-sm md:text-base">{loggedInUser?.name}님, 오늘도 화이팅입니다.</p>
+          <p className="text-slate-200 font-medium text-sm md:text-base">{loggedInUser?.name || '사용자'}님, 오늘도 화이팅입니다.</p>
         </div>
       </div>
+
+      {/* 재배정 필요 배너 (내가 PM인 프로젝트에서 반려된 작업이 있을 때만) */}
+      {rejectedForMe.length > 0 && (
+        <button
+          onClick={() => setCurrentView && setCurrentView('projects')}
+          className="w-full mb-5 md:mb-6 bg-gradient-to-r from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100 border-2 border-rose-200 rounded-2xl md:rounded-3xl p-4 md:p-5 flex items-center gap-3 md:gap-4 shadow-sm hover:shadow transition-all text-left group"
+        >
+          <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 9v4" />
+              <path d="M12 17h.01" />
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm md:text-base font-black text-rose-900">재배정 필요 {rejectedForMe.length}건</h3>
+            <p className="text-xs md:text-sm text-rose-700 font-medium mt-0.5">
+              팀원이 반려한 작업이 있어요. 프로젝트 화면에서 다른 담당자에게 배정해주세요.
+            </p>
+          </div>
+          <div className="text-rose-500 group-hover:translate-x-1 transition-transform shrink-0">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </div>
+        </button>
+      )}
 
       {/* 카드 그리드 */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">

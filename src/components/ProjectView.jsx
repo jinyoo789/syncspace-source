@@ -62,6 +62,7 @@ export default function ProjectView({ projects, tasks, onOpenModal }) {
           const deploys = proj.deploys || [];
           const stgDeploy = deploys.find(d => d.env === 'STG');
           const prdDeploy = deploys.find(d => d.env === 'PRD');
+          const rejectedTasks = pt.filter(t => t.status === '반려');
 
           // 프로젝트에 관련된 모든 사람 수집 (PM 포함)
           const allMembers = new Set();
@@ -126,6 +127,35 @@ export default function ProjectView({ projects, tasks, onOpenModal }) {
                   <div className="text-center text-gray-400 py-2 text-[10px]">배포 일정 미등록</div>
                 )}
               </div>
+
+              {/* 재배정 필요 (반려된 작업) */}
+              {rejectedTasks.length > 0 && (
+                <div className="mb-5 bg-rose-50/60 border border-rose-200 rounded-xl p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                    <h4 className="text-[11px] font-black text-rose-700 uppercase tracking-wide">재배정 필요 {rejectedTasks.length}건</h4>
+                  </div>
+                  <div className="space-y-1.5">
+                    {rejectedTasks.map(t => {
+                      const prevAssignees = getTaskAssignees(t);
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={(e) => { e.stopPropagation(); onOpenModal && onOpenModal(t, 'edit'); }}
+                          className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-rose-100 cursor-pointer hover:border-rose-300 hover:shadow-sm transition-all"
+                        >
+                          <span className="text-xs font-bold text-gray-800 truncate flex-1">{t.title}</span>
+                          {prevAssignees.length > 0 && (
+                            <span className="text-[9px] text-gray-400 shrink-0">
+                              이전: {prevAssignees.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* 하단 */}
               <div className="pt-4 border-t border-gray-100 flex justify-between items-center mt-auto">
