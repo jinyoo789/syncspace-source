@@ -1,5 +1,5 @@
 // src/components/TaskModal.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getTaskAssignees, getTaskDateRange, getMemberName } from '../utils';
 
 // ─── 아이콘 ───
@@ -85,11 +85,15 @@ export default function TaskModal({
   const [crmBulkMode, setCrmBulkMode] = useState(false);
   const [crmBulkEnd, setCrmBulkEnd] = useState(TODAY);
 
+  // 모달 열릴 때 초기 폼 스냅샷 — ESC/오버레이/X 닫기 시 dirty 체크용
+  const initialFormSnapshotRef = useRef(null);
+
   useEffect(() => {
     if (isOpen) {
       setConfirmDelete(false);
       setCrmBulkMode(false);
       setCrmBulkEnd(TODAY);
+      let nextForm;
       if (initialTask) {
         // 레거시 정규화: dev_id / qa_dev_id 자리에 이름이 저장된 경우 id로 변환해서 로드.
         // 이렇게 해두면 이후 저장 시 올바른 id로 Firestore에 반영되어 자연스럽게 마이그레이션됨.
@@ -103,34 +107,46 @@ export default function TaskModal({
         const normalizedQaDevId = initialTask.qa_dev_id
           ? (memberIdFromLegacy(initialTask.qa_dev_id, team) || initialTask.qa_dev_id)
           : '';
-        setFormData({
+        nextForm = {
           ...getDefaultForm(initialTask.type),
           ...initialTask,
           subtasks: normalizedSubtasks,
           qa_dev_id: normalizedQaDevId,
           deploys: initialTask.deploys || [],
-        });
+        };
       } else {
-        setFormData(getDefaultForm(createType));
+        nextForm = getDefaultForm(createType);
       }
+      setFormData(nextForm);
+      initialFormSnapshotRef.current = JSON.stringify(nextForm);
     }
   }, [isOpen, initialTask, createType, team]);
 
   const isEditing = mode === 'edit' || mode === 'create';
   const safeClose = () => {
     if (isEditing) {
+      // 편집한 내용이 없으면 confirm 없이 바로 닫기
+      const isDirty = JSON.stringify(formData) !== initialFormSnapshotRef.current;
+      if (!isDirty) {
+        onClose();
+        return;
+      }
       if (window.confirm('저장하지 않고 닫으시겠습니까?')) onClose();
     } else {
       onClose();
     }
   };
 
+  // safeClose의 최신 참조를 ref로 유지 — keydown 리스너가 stale closure를 잡지 않도록
+  const safeCloseRef = useRef(safeClose);
+  safeCloseRef.current = safeClose;
+
   // ESC 키
   useEffect(() => {
-    const handleKey = (e) => { if (e.key === 'Escape') safeClose(); };
+    const handleKey = (e) => { if (e.key === 'Escape') safeCloseRef.current(); };
     if (isOpen) window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [isOpen, isEditing]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

@@ -11,7 +11,7 @@ export const CATEGORIES = [
 ];
 
 // ─── 역할 목록 ───
-export const ROLES = ['BE', 'FE', 'QA', 'Design'];
+export const ROLES = ['BE', 'FE', 'QA', 'Design', '세무기획'];
 
 // ─── 팀원 시드 데이터 ───
 export const SEED_TEAM = [
