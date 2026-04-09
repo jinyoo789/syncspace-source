@@ -416,7 +416,7 @@ export default function TaskModal({
                   {formData.note && (
                     <div className="flex gap-4 text-sm">
                       <span className="text-gray-500">메모</span>
-                      <span className="text-gray-800">{formData.note}</span>
+                      <span className="text-gray-800 whitespace-pre-wrap">{formData.note}</span>
                     </div>
                   )}
                 </div>
@@ -461,7 +461,7 @@ export default function TaskModal({
             {formData.type === 'feature' && formData.note && (
               <div>
                 <h4 className="text-[11px] font-bold text-gray-400 uppercase mb-2">메모</h4>
-                <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-xl border border-gray-200">{formData.note}</p>
+                <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-xl border border-gray-200 whitespace-pre-wrap">{formData.note}</p>
               </div>
             )}
 
@@ -469,7 +469,7 @@ export default function TaskModal({
             {formData.type === 'todo' && formData.note && (
               <div>
                 <h4 className="text-[11px] font-bold text-gray-400 uppercase mb-2">메모</h4>
-                <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-xl border border-gray-200">{formData.note}</p>
+                <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-xl border border-gray-200 whitespace-pre-wrap">{formData.note}</p>
               </div>
             )}
 
