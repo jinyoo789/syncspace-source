@@ -1,0 +1,31 @@
+name: Activity log cleanup
+
+on:
+  schedule:
+    # 매일 UTC 03:00 (한국 시간 정오) 실행
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: scripts
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Run cleanup
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RETENTION_DAYS: '180'
+        run: node cleanup-activity-log.js
